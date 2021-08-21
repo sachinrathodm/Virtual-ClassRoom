@@ -1,7 +1,7 @@
 require('dotenv').config()
 const express = require('express')
-const db = require('./jwt-project/config/database')
-const auth = require('./jwt-project/middleware/auth')
+const db = require('./jwt/config/database')
+const auth = require('./jwt/middleware/auth')
 
 db.connect()
 const app = express()
