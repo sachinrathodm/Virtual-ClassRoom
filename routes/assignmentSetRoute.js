@@ -47,7 +47,10 @@ router.post('/create', auth, async function (req, res) {
 
         const newassignment_publishdate = Date.parse(assignment_publishdate)
         const newassignment_deadline = Date.parse(assignment_deadline)
-
+        if (newassignment_publishdate < new Date().getTime())
+            return res.status(400).send('assignment publishdate is Invalid.')
+        if (newassignment_deadline < newassignment_publishdate)
+            return res.status(400).send('assignment deadline is Invalid.')
         if (newassignment_publishdate > new Date().getTime())
             assignment_status = conf.SCHEDULED
 
@@ -143,9 +146,13 @@ router.post('/update/:assignmentId', auth, async function (req, res) {
 
         const newassignment_publishdate = Date.parse(assignment_publishdate)
         const newassignment_deadline = Date.parse(assignment_deadline)
-
         console.log(newassignment_publishdate)
         console.log(new Date().getTime())
+        if (newassignment_publishdate < new Date().getTime())
+            return res.status(400).send('assignment publishdate is Invalid.')
+        if (newassignment_deadline < newassignment_publishdate)
+            return res.status(400).send('assignment deadline is Invalid.')
+
         if (newassignment_publishdate > new Date().getTime())
             assignment_status = conf.SCHEDULED
 
@@ -220,80 +227,123 @@ router.post('/delete/:assignmentId', auth, async function (req, res) {
     }
 })
 
-//student assign assignments
-router.post('/assign', auth, async function (req, res) {
-    if (req.user.type !== conf.STUDENT)
+//tutor view assignment list
+router.get('/assignmentlist', auth, async function (req, res) {
+    if (req.user.type !== conf.TUTOR)
         return res.status(401).send('Unauthorized To acess')
-
     try {
-        const assignmentList = await assignmentSchema.find({})
-        var studentAssignmentList = []
-        for (let i = 0; i < assignmentList.length; i++) {
-            const emailindex = assignmentList[i].student_email.indexOf(
-                req.user.email
-            )
-            if (emailindex >= 0) {
-                console.log(assignmentList[i])
-                const tempAssignment = {
-                    assignment_name: assignmentList[i].assignment_name,
-                    assignment_description:
-                        assignmentList[i].assignment_description,
-                    assignment_publishdate:
-                        assignmentList[i].assignment_publishdate,
-                    assignment_deadline: assignmentList[i].assignment_deadline,
-                    student_submission: {
-                        submissionlink:
-                            assignmentList[i].student_submission[emailindex]
-                                .submissionlink,
-                        submissiondate:
-                            assignmentList[i].student_submission[emailindex]
-                                .submissiondate,
-                        status: assignmentList[i].student_submission[emailindex]
-                            .status,
-                        remark: assignmentList[i].student_submission[emailindex]
-                            .remark,
-                    },
-                }
-                studentAssignmentList.push(tempAssignment)
-            }
-        }
-
-        res.status(200).send(studentAssignmentList)
+        const assignmentList = await assignmentSchema.find({
+            tutor_id: req.user.user_id,
+        })
+        res.status(200).send(assignmentList)
     } catch (err) {
         res.status(400).send(err)
     }
 })
 
-//student submit Assignment
-router.post('/submit/:assignmentId', auth, async function (req, res) {
-    if (req.user.type !== conf.STUDENT)
-        return res.status(401).send('Unauthorized To acess')
+//given remark
+router.post(
+    '/remark/:assignmentId/:studentid',
+    auth,
+    async function (req, res) {
+        if (req.user.type !== conf.TUTOR)
+            return res.status(401).send('Unauthorized To acess')
+        try {
+            const assignment = await assignmentSchema.findOne({
+                _id: req.params.assignmentId,
+            })
+            const studentid = await User.findOne({
+                _id: req.params.studentid,
+            })
+            console.log(studentid)
+            console.log(assignment.student_email.includes(studentid.email))
+            console.log(assignment)
+            console.log(assignment.tutor_id.equals(req.user.user_id))
+            if (!studentid)
+                return res.status(400).send('student id is Invalid.')
+            if (!assignment.student_email.includes(studentid.email))
+                return res.status(400).send('student id is not in email.')
+            if (!assignment)
+                return res.status(400).send('assignment id is Invalid.')
+            if (!assignment.tutor_id.equals(req.user.user_id))
+                return res
+                    .status(400)
+                    .send('you are not register for this Assignment.')
+            const { remark } = req.body
+            if (!remark) res.status(400).send('Missing fields')
+            console.log(remark)
+            const emailindex = assignment.student_email.indexOf(studentid.email)
+            assignment.student_submission[emailindex].remark = remark
+            assignment.save()
+            res.status(200).send(assignment.student_submission[emailindex])
+        } catch (err) {
+            res.status(400).send(err)
+        }
+    }
+)
 
+//GET ALL PENDING SUBMITTED OVERDUE STUDENT ASSIGNMENT
+router.get('/:status/:assignmentId', auth, async function (req, res) {
+    if (req.user.type !== conf.TUTOR && req.user.type !== conf.STUDENT)
+        return res.status(401).send('Unauthorized To acess')
     try {
+        const status = req.params.status
+        if (
+            !(
+                status != conf.PENDING ||
+                status != conf.SUBMITTED ||
+                status != conf.OVERDUE ||
+                status != conf.ALL
+            )
+        )
+            return res.status(400).send('status is Invalid.')
+
         const assignment = await assignmentSchema.findOne({
             _id: req.params.assignmentId,
         })
         if (!assignment) res.status(400).send('assignment id is Invalid.')
-        if (!assignment.student_email.includes(req.user.email))
-            res.status(400).send('you are not register for this Assignment.')
-        const { submissionlink } = req.body
-        if (!submissionlink) res.status(400).send('Missing fields')
-        console.log(req.user.email)
-        var indexOfStudent = assignment.student_email.indexOf(req.user.email)
+        if (req.user.type == conf.TUTOR) {
+            if (!assignment.tutor_id.equals(req.user.user_id))
+                res.status(400).send(
+                    'you are not register for this Assignment.'
+                )
 
-        if (indexOfStudent >= 0) {
-            assignment.student_submission[indexOfStudent].submissionlink =
-                submissionlink
-            assignment.student_submission[indexOfStudent].submissiondate =
-                new Date().getTime()
-            new Date().getTime() > assignment.assignment_deadline
-                ? (assignment.student_submission[indexOfStudent].status =
-                      conf.OVERDUE)
-                : (assignment.student_submission[indexOfStudent].status =
-                      conf.SUBMITTED)
+            const { student_submission } = assignment
+            if (student_submission.length > 0) {
+                var pendingStudentAssignment = []
+                for (let i = 0; i < student_submission.length; i++) {
+                    if (
+                        status == conf.ALL ||
+                        student_submission[i].status === status
+                    ) {
+                        pendingStudentAssignment.push({
+                            ...student_submission[i]._doc,
+                            email: assignment.student_email[i],
+                        })
+                    }
+                }
+                res.status(200).send(pendingStudentAssignment)
+            }
+        } else if (req.user.type == conf.STUDENT) {
+            const emailindex = assignment.student_email.indexOf(req.user.email)
+            const { student_submission } = assignment
+            if (student_submission.length > 0) {
+                var pendingStudentAssignment = []
+
+                if (
+                    status == conf.ALL ||
+                    student_submission[emailindex].status === status
+                ) {
+                    pendingStudentAssignment.push({
+                        ...student_submission[emailindex]._doc,
+                        email: assignment.student_email[emailindex],
+                    })
+                }
+                res.status(200).send(pendingStudentAssignment)
+            }
+        } else {
+            res.status(200).send(assignment.student_submission)
         }
-        assignment.save()
-        res.status(200).send(assignment.student_submission[indexOfStudent])
     } catch (err) {
         res.status(400).send(err)
     }
