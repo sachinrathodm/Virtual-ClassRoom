@@ -15,6 +15,10 @@ app.use('/user', user_router)
 var assignment_router = require('./routes/assignmentSetRoute')
 app.use('/assignment', assignment_router)
 
+//Route Student Submission
+var submission_router = require('./routes/submissionRoute')
+app.use('/submission', submission_router)
+
 app.post('/welcome', auth, (req, res) => {
     res.status(200).send('Welcome' + req.user.email)
 })
